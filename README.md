@@ -20,6 +20,8 @@ $ pip install .
 
 ## Installation using Docker
 
+这部分有问题呀，disable ptrace_scope应该在docker中执行，而且run的时候需要添加--privileged
+
 ~~~~{.sh}
 # disable ptrace_scope for PIN
 $ echo 0|sudo tee /proc/sys/kernel/yama/ptrace_scope
@@ -28,7 +30,8 @@ $ echo 0|sudo tee /proc/sys/kernel/yama/ptrace_scope
 $ docker build -t qsym ./
 
 # run docker image
-$ docker run --cap-add=SYS_PTRACE -it qsym /bin/bash
+$ docker run --cap-add=SYS_PTRACE -it qsym /bin/bash     #   <-bug
+$ docker run -d --name qsym --cap-add=SYS_PTRACE --privileged phusion/baseimage:0.10.1   # 选择了一个精简的ubuntu16.04镜像
 ~~~~
 
 ## Installation using vagrant

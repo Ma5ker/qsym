@@ -78,6 +78,9 @@ class Executor(object):
         return False
 
     def gen_cmd(self, timeout):
+        '''
+        timeout -k 5 timeout
+        '''
         cmd = []
         if timeout:
             cmd += ["timeout", "-k", str(5), str(timeout)]

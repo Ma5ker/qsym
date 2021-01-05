@@ -25,9 +25,9 @@ enum {
 const INT32 kMaxSyscallArgNum = SYSCALL_ARG5 + 1;
 
 typedef struct {
-    int nr;
-    ADDRINT arg[kMaxSyscallArgNum];
-    ADDRINT ret;
+    int nr;//系统调用号
+    ADDRINT arg[kMaxSyscallArgNum];//参数
+    ADDRINT ret;//返回
     void* aux;
 } SyscallContext;
 

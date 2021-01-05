@@ -5,7 +5,7 @@
 #include "memory.h"
 
 namespace qsym {
-
+//跳转类型
 enum JccKind {
   JCC_B,
   JCC_BE,
@@ -17,6 +17,7 @@ enum JccKind {
   JCC_Z,
 };
 
+//OpKind指令操作类型
 enum OpKind {
   // from QEMU
   CC_OP_ADD,
@@ -34,6 +35,7 @@ enum OpKind {
   CC_OP_LAST
 };
 
+//Eflag
 enum Eflag {
   // bad name
   EFLAGS_CF = (1 << 0),

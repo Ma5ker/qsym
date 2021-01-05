@@ -12,6 +12,9 @@ def FATAL(msg):
     sys.exit(-1)
 
 def fix_at_file(cmd, testcase):
+    '''
+    @@ -> testcase and set stdin = None
+    '''
     cmd = copy.copy(cmd)
     if AT_FILE in cmd:
         idx = cmd.index(AT_FILE)

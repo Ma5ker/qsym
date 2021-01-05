@@ -45,7 +45,8 @@ bool canEvaluateTruncated(ExprRef e, UINT bits, UINT depth=0) {
       UINT high_bits = e->bits() - bits;
       if (e->getChild(0)->countLeadingZeros() >= high_bits
           && e->getChild(1)->countLeadingZeros() >= high_bits) {
-        return canEvaluateTruncated(e->getChild(0), depth + 1)
+        return canEvaluateTruncated(e->getChild(0), 
+        depth + 1)
           && canEvaluateTruncated(e->getChild(1), depth + 1);
       }
       else

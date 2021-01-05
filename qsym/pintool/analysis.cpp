@@ -8,11 +8,14 @@ namespace qsym {
 void
 analyzeTrace(TRACE trace, VOID *v)
 {
+  //遍历trace的基本块  对每个基本块调用analyzeBBL；对每个基本块的指令调用analyzeInstruction
   for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl)) {
+    //基本块粒度的分析
     analyzeBBL(bbl);
     for (INS ins = BBL_InsHead(bbl);
         INS_Valid(ins);
         ins = INS_Next(ins)) {
+      //指令粒度的分析
       analyzeInstruction(ins);
     }
   }
@@ -20,24 +23,29 @@ analyzeTrace(TRACE trace, VOID *v)
 
 void
 analyzeInstruction(INS ins) {
+  // 使用intelxed(https://github.com/intelxed/xed)解码
   // use XED to decode the instruction and extract its opcode
-	xed_iclass_enum_t ins_indx = (xed_iclass_enum_t)INS_Opcode(ins);
-
+	xed_iclass_enum_t ins_indx = (xed_iclass_enum_t)INS_Opcode(ins);// instruction name
+  //如果有非法指令就报错
 	if (ins_indx <= XED_ICLASS_INVALID ||
 				ins_indx >= XED_ICLASS_LAST) {
     LOG_WARN("unknown opcode (opcode=" + decstr(ins_indx) + ")" + "\n");
 		return;
 	}
-
+  //根据解析得到的指令来选择
+  //插入对应的桩代码
   switch (ins_indx) {
   // XED_ICLASS_AAA,
   // XED_ICLASS_AAD,
   // XED_ICLASS_AAM,
   // XED_ICLASS_AAS,
+  //推测似乎带进位借位的加法与减法会调用这段桩代码
+  //ADC指令时调用analyzeCarry   后面还有个SBB也调用这个
   case XED_ICLASS_ADC:
     analyzeCarry(ins, Add);
     break;
   // XED_ICLASS_ADCX,
+  //普通加法指令 
   case XED_ICLASS_ADD:
     analyzeBinary(ins, Add, true);
     break;
@@ -407,6 +415,7 @@ analyzeInstruction(INS ins) {
   // XED_ICLASS_IRET,
   // XED_ICLASS_IRETD,
   // XED_ICLASS_IRETQ,
+  //针对跳转指令的  如果qsym是在每个分支处求解的话 应该就是在这儿了
   case XED_ICLASS_JB:
     analyzeJcc(ins, JCC_B, false);
     break;

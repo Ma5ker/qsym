@@ -9,8 +9,8 @@
 
 namespace qsym {
 
-set<int>     kFdSet;
-std::string  kInput;
+set<int>     kFdSet;//文件描述符（输入流）集合？
+std::string  kInput;//传入输入
 
 extern SyscallDesc  kSyscallDesc[kSyscallMax];
 extern Memory g_memory;
@@ -394,6 +394,7 @@ void setMMapHookForFile()
 
 } // anonymous namespace
 
+//hook 系统调用
 void hookSyscalls(bool hook_stdin, bool hook_fs, bool hook_net,
                   const std::string& input) {
   initializeSyscallDesc();
@@ -404,7 +405,9 @@ void hookSyscalls(bool hook_stdin, bool hook_fs, bool hook_net,
   // Add stdin to the interesting descriptors set
   if (hook_stdin != 0)
     kFdSet.insert(STDIN_FILENO);
-
+  
+  //根据传入参数判定如何hook
+  //似乎通过替换系统描述符表实现的hook
   if (hook_net)
     setSocketCallHook();
 

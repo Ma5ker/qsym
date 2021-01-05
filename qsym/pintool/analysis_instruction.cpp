@@ -1,7 +1,7 @@
 #include <cassert>
 #include "analysis_instruction.h"
 #include "instrument.h"
-
+// code all in one
 namespace qsym {
 
 extern REG g_thread_context_reg;
@@ -83,6 +83,9 @@ void getMemoryType(INS ins, INT32 i, INT32& count,
   }
 }
 
+//根据内存读写类型决定参数宏
+//如果是涉及到内存写的指令 就用写的宏
+//否则用内存读的参数宏
 void getMemoryType(bool write,
     IARG_TYPE& addr_ty,
     IARG_TYPE& size_ty) {
@@ -213,6 +216,15 @@ analyzeUnary(
     UNREACHABLE();
 }
 
+//analyzeBinary 有多个实现  但最后五个参数是相同的函数指针（函数指针也有多种实现）， 命名似乎是针对后面的参数定的
+//对于add这种指令 只有下面5种
+//instrument_rr  参数均为寄存器
+//instrument_ri  寄存器和立即数
+//instrument_rm  寄存器和内存
+//instrument_mr  内存和寄存器
+//instrument_mi  内存和立即数
+//不同点在前面的参数  ins  write  arg(1)  arg2    会根据这几个参数 指定对应的函数（前面五种函数指针也有多种实现）
+//功能可以概括为：根据传入的参数类型 对应的在ins前插入上述五个函数的桩代码
 static void
 analyzeBinary(
     INS ins,
@@ -222,13 +234,16 @@ analyzeBinary(
     AFUNPTR instrument_rm,
     AFUNPTR instrument_mr,
     AFUNPTR instrument_mi) {
+  //按第一个参数是不是寄存器分为两类
+  //如果第一个参数是r
   if (INS_OperandIsReg(ins, OP_0)) {
     REG dst = GET_REG(ins, OP_0);
-
+    //要是参数是r r,那么传入的rr函数必不能为空,后面的也同理，所对应的函数不能为NULL
     if (INS_OperandIsReg(ins, OP_1)) {
       QSYM_ASSERT(instrument_rr != NULL);
 
-      REG src = GET_REG(ins, OP_1);
+      REG src = GET_REG(ins, OP_1);//获取了两个寄存器
+      //在每条这种指令前插入了桩代码instrument_rr函数 传入参数为上下文以及两个寄存器
       INS_InsertCall(ins,
           IPOINT_BEFORE,
           instrument_rr,
@@ -238,9 +253,10 @@ analyzeBinary(
           IARG_REG(src),
           IARG_END);
     }
+    //如果参数是r  i
     else if (INS_OperandIsImmediate(ins, OP_1)) {
       QSYM_ASSERT(instrument_ri != NULL);
-
+      //获取立即数值  也就是每个参数  传入调用函数instrument_ri
       ADDRINT imm = INS_OperandImmediate(ins, OP_1);
       INS_InsertCall(ins,
           IPOINT_BEFORE,
@@ -251,6 +267,7 @@ analyzeBinary(
           IARG_IMM(imm),
           IARG_END);
     }
+    //第二参数 内存   把相关内存和寄存器传入instrument_rm
     else if (INS_OperandIsMemory(ins, OP_1)) {
       QSYM_ASSERT(instrument_rm != NULL);
 
@@ -260,16 +277,18 @@ analyzeBinary(
           IARG_FAST_ANALYSIS_CALL,
           IARG_CPU_CONTEXT,
           IARG_REG(dst),
-          IARG_MEM_READ(ins),
+          IARG_MEM_READ(ins),//宏定义的参数列表  关于内存读取的参数
           IARG_END);
     }
     else
       UNREACHABLE();
   }
+  //第一个参数是内存地址
   else if (INS_OperandIsMemory(ins, OP_0)) {
     IARG_TYPE addr_ty, size_ty;
-    getMemoryType(write, addr_ty, size_ty);
+    getMemoryType(write, addr_ty, size_ty);//根据内存操作类型来设置对应的参数
 
+    //判断的第二个操作数类型是否为寄存器
     if (INS_OperandIsReg(ins, OP_1)) {
       QSYM_ASSERT(instrument_mr != NULL);
 
@@ -283,6 +302,7 @@ analyzeBinary(
           IARG_REG(src),
           IARG_END);
     }
+    //第二个操作时为立即数
     else if (INS_OperandIsImmediate(ins, OP_1)) {
       QSYM_ASSERT(instrument_mi != NULL);
 
@@ -302,12 +322,12 @@ analyzeBinary(
   else
     UNREACHABLE();
 }
-
+//跟上一个逻辑基本差不多 主要是多了一个布尔变量arg
 static void
 analyzeBinary(
-    INS ins,
-    bool write,
-    UINT arg,
+    INS ins,//指令句柄
+    bool write,//是否存在写入操作
+    UINT arg,//指令类型 -> kind
     AFUNPTR instrument_rr,
     AFUNPTR instrument_ri,
     AFUNPTR instrument_rm,
@@ -323,9 +343,9 @@ analyzeBinary(
           instrument_rr,
           IARG_FAST_ANALYSIS_CALL,
           IARG_CPU_CONTEXT,
-          IARG_REG(dst),
-          IARG_REG(src),
-          IARG_ARG(arg),
+          IARG_REG(dst),//目标寄存器
+          IARG_REG(src),//源寄存器
+          IARG_ARG(arg),//指令类型
           IARG_END);
     }
     else if (INS_OperandIsImmediate(ins, OP_1)) {
@@ -397,10 +417,10 @@ analyzeBinary(
 
 static void
 analyzeBinary(
-    INS ins,
-    bool write,
-    UINT arg1,
-    UINT arg2,
+    INS ins,//指令的handle
+    bool write,//指令是否存在写入
+    UINT arg1,//指令操作类型
+    UINT arg2,//指令是否存在写入?
     AFUNPTR instrument_rr,
     AFUNPTR instrument_ri,
     AFUNPTR instrument_rm,
@@ -416,10 +436,10 @@ analyzeBinary(
           instrument_rr,
           IARG_FAST_ANALYSIS_CALL,
           IARG_CPU_CONTEXT,
-          IARG_REG(dst),
-          IARG_REG(src),
-          IARG_ARG(arg1),
-          IARG_ARG(arg2),
+          IARG_REG(dst),//目的寄存器
+          IARG_REG(src),//源寄存器
+          IARG_ARG(arg1),//指令类型
+          IARG_ARG(arg2),//指令是否存在写入?
           IARG_END);
     }
     else if (INS_OperandIsImmediate(ins, OP_1)) {
@@ -681,6 +701,8 @@ analyzeTernaryImm(
 }
 } // namespace
 
+//其实就是在每个基本块执行前插入了一个instrumentBBL函数,参数为IARG_THREAD_CONTEXT(即g_thread_context_reg),IARG_CONTEXT(即read-only CONTEXT*)
+//最后将call_stack_manager的last_pc设置为了基本块第一条指令地址，pending设置为true
 void
 analyzeBBL(BBL bbl) {
   BBL_InsertCall(bbl,
@@ -690,6 +712,9 @@ analyzeBBL(BBL bbl) {
       IARG_END);
 }
 
+// ins  指令句柄
+// kind 指令类型
+// write  是否是一个存在写入操作的指令
 void
 analyzeBinary(INS ins, Kind kind, bool write) {
   // write as the second argument
@@ -702,6 +727,9 @@ analyzeBinary(INS ins, Kind kind, bool write) {
       (AFUNPTR)instrumentBinaryMemImm);
 }
 
+//包含进位(借位)操作的指令调用
+// ins 指令句柄
+// Kind 指令类型
 void
 analyzeCarry(INS ins, Kind kind) {
   analyzeBinary(
@@ -1130,7 +1158,7 @@ analyzeNegNot(INS ins, Kind kind) {
     (AFUNPTR)instrumentNegNotReg,
     (AFUNPTR)instrumentNegNotMem);
 }
-
+//对各类条件跳转的分析
 void
 analyzeJcc(INS ins, JccKind jcc_kind, bool inv) {
   INS_InsertCall(ins,

@@ -11,7 +11,7 @@
 #define XXH_STATIC_LINKING_ONLY
 #include "third_party/xxhash/xxhash.h"
 
-
+//根据size或者叫长度来判定其类型  AL/AX/EAX/RAX  否则为REG_INVALID
 inline REG getAx(USIZE size) {
   switch(size) {
     case 1:
@@ -30,6 +30,7 @@ inline REG getAx(USIZE size) {
 }
 
 inline REG getAx(REG r) {
+
   return getAx(REG_Size(r));
 }
 

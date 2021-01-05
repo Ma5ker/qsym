@@ -8,9 +8,11 @@
 // bit position
 namespace qsym {
 
+//
 void instrumentBBL(
     ThreadContext *thread_ctx,
     const CONTEXT* ctx) {
+  //设置了一个call_stack_manager 的last_pc_为EIP寄存器值，pending_为true
   g_call_stack_manager.visitBasicBlock(PIN_GetContextReg(ctx, REG_INST_PTR));
 }
 
@@ -156,9 +158,11 @@ fixImmExpr(
 inline void makeAddrConcrete(ThreadContext *thread_ctx,
     const CONTEXT* ctx,
     MEM_ARG) {
+  //获取地址的表达式
   ExprRef e = thread_ctx->getAddrExpr(ctx, base, index, disp, scale);
   if (e) {
     LOG_DEBUG("makeAddrConcrete: pc=" + hexstr(PIN_GetContextReg(ctx, REG_INST_PTR)) + "\n");
+    //调用Solver::addAddr，将一个地址与相关的表达式值相等的约束添加到约束集合中
     makeAddrConcrete(e, addr);
   }
 }
@@ -167,7 +171,7 @@ inline ExprRef getExprFromMemSrc(ThreadContext *thread_ctx,
     const CONTEXT* ctx,
     MEM_ARG) {
   // TODO: need to change this unintuitive name
-  makeAddrConcrete(thread_ctx, ctx, base, index, addr, size, disp, scale);
+  makeAddrConcrete(thread_ctx, ctx, base, index, addr, size, disp, scale);//添加一个地址约束
   return g_memory.getExprFromMem(addr, size);
 }
 
@@ -187,13 +191,14 @@ getExprFromRegReg(
     ExprRef* expr_dst,
     ExprRef* expr_src) {
   // return false if all expressions are NULL
+  //调用getExprFromReg从目标寄存器获取表达式变量  
   *expr_dst = thread_ctx->getExprFromReg(ctx, dst);
   *expr_src = thread_ctx->getExprFromReg(ctx, src);
-
+  // 两个都为NULL  返回false
   if (*expr_dst == NULL
       && *expr_src == NULL)
     return false;
-
+  //其中一个为NULL时，使用常量补充
   fixRegExpr(expr_dst, ctx, dst);
   fixRegExpr(expr_src, ctx, src);
   return true;
@@ -879,6 +884,7 @@ instrumentShiftdMemRegCl(
   g_memory.setExprToMem(addr, size, expr_res);
 }
 
+//操作类型  Add Sub 和 逻辑操作
 static OpKind
 getOpKindBinary(Kind kind) {
   if (kind == Add)
@@ -892,9 +898,11 @@ getOpKindBinary(Kind kind) {
   else {
     UNREACHABLE();
     return CC_OP_LAST;
+
   }
 }
 
+//计算执行指令后的表达式
 static ExprRef
 doBinary(
     ThreadContext* thread_ctx,
@@ -902,11 +910,14 @@ doBinary(
     OpKind op_kind,
     ExprRef expr_dst,
     ExprRef expr_src) {
+  //计算执行指令后的表达式
   ExprRef expr_res = g_expr_builder->createBinaryExpr(kind, expr_dst, expr_src);
+  //设置标志寄存器
   thread_ctx->setEflags(op_kind, expr_res, expr_dst, expr_src);
   return expr_res;
 }
 
+//处理函数 ins reg,reg
 void PIN_FAST_ANALYSIS_CALL
 instrumentBinaryRegReg(
     ThreadContext* thread_ctx,
@@ -915,10 +926,13 @@ instrumentBinaryRegReg(
     REG src,
     Kind kind,
     bool write) {
+  //声明两个ExprRef变量(z3)
   ExprRef expr_dst = NULL;
   ExprRef expr_src = NULL;
+  //获取操作类型 CC_OP_ADD  CC_OP_SUB CC_OP_LOGIC CC_OP_LAST
   OpKind op_kind = getOpKindBinary(kind);
 
+  //getExprFromRegReg  获取两个寄存器的表达式放入两个表达式变量
   if (!getExprFromRegReg(
         thread_ctx,
         ctx,
@@ -926,11 +940,13 @@ instrumentBinaryRegReg(
         src,
         &expr_dst,
         &expr_src)) {
+    //error handle
     thread_ctx->invalidateEflags(op_kind);
     return;
   }
-
+  //计算执行指令后的表达式
   ExprRef expr_res = doBinary(thread_ctx, kind, op_kind, expr_dst, expr_src);
+  //如果存在写入操作就放入指定寄存器
   if (write)
     thread_ctx->setExprToReg(dst, expr_res);
 }
@@ -2202,42 +2218,44 @@ instrumentNegNotMem(
   if (expr_res != NULL)
     g_memory.setExprToMem(addr, size, expr_res);
 }
-
+//Jcc处理
 void
 instrumentJcc(ThreadContext* thread_ctx,
     const CONTEXT* ctx,
     bool taken, ADDRINT target,
     JccKind jcc_c, bool inv) {
-  ExprRef e = thread_ctx->computeJcc(ctx, jcc_c, inv);
+  ExprRef e = thread_ctx->computeJcc(ctx, jcc_c, inv);//计算jcc跳转的条件表达式
   if (e) {
     ADDRINT pc = PIN_GetContextReg(ctx, REG_INST_PTR);
     LOG_DEBUG("Symbolic branch at " + hexstr(pc) + ": " + e->toString() + "\n");
 #ifdef CONFIG_TRACE
     trace_addJcc(e, ctx, taken);
 #endif
-    g_solver->addJcc(e, taken, pc);
+    g_solver->addJcc(e, taken, pc);//约束计算
   }
 }
 
+//结合前面的约束，求解此次jmp reg的反向约束(寄存器的表达式!=实际值)；失败则只求解此次约束的反向条件;此次约束条件加入条件约束池，下一次求解使用
 void PIN_FAST_ANALYSIS_CALL
 instrumentJmpReg(ThreadContext* thread_ctx, const CONTEXT* ctx, REG r) {
   ExprRef e = thread_ctx->getExprFromReg(ctx, r);
   if (e != NULL) {
     LOG_DEBUG("Symbolic jmp: " + e->toString() + "\n");
-    llvm::APInt val = getRegValue(ctx, r);
-    g_solver->solveAll(e, val);
-    thread_ctx->clearExprFromReg(r);
+    llvm::APInt val = getRegValue(ctx, r);//获取reg实际的值
+    g_solver->solveAll(e, val);//求解反向路径
+    thread_ctx->clearExprFromReg(r);//清除掉reg对应的表达式
   }
 }
 
+//结合前面的约束，求解此次jmp mem的反向约束(mem的表达式!=实际值)；失败则只求解此次约束的反向条件;此次约束条件加入条件约束池，下一次求解使用
 void PIN_FAST_ANALYSIS_CALL
 instrumentJmpMem(ThreadContext* thread_ctx, const CONTEXT* ctx, MEM_ARG) {
   ExprRef e = g_memory.getExprFromMem(addr, size);
   if (e != NULL) {
     LOG_DEBUG("Symbolic jmp: " + e->toString() + "\n");
-    llvm::APInt val = getMemValue(addr, size);
-    g_solver->solveAll(e, val);
-    g_memory.clearExprFromMem(addr, size);
+    llvm::APInt val = getMemValue(addr, size);//获取mem实际的值
+    g_solver->solveAll(e, val);//求解
+    g_memory.clearExprFromMem(addr, size);//清除掉mem的表达式
   }
 }
 

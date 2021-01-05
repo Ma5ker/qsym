@@ -104,7 +104,7 @@ Solver::Solver(
   solver_.set(p);
 
   checkOutDir();
-  readInput();
+  readInput();//从文件读入输入
 }
 
 void Solver::push() {
@@ -124,6 +124,7 @@ void Solver::add(z3::expr expr) {
     solver_.add(expr.simplify());
 }
 
+//检查是否有解   或者可以叫 求解过程
 z3::check_result Solver::check() {
   uint64_t before = getTimeStamp();
   z3::check_result res;
@@ -146,17 +147,20 @@ z3::check_result Solver::check() {
   return res;
 }
 
+//有解保存 返回true
 bool Solver::checkAndSave(const std::string& postfix) {
+  //有解则保存
   if (check() == z3::sat) {
     saveValues(postfix);
     return true;
   }
+  //否则输出无解调试信息 并返回false
   else {
     LOG_DEBUG("unsat\n");
     return false;
   }
 }
-
+//called from instrumentJcc
 void Solver::addJcc(ExprRef e, bool taken, ADDRINT pc) {
   // Save the last instruction pointer for debugging
   last_pc_ = pc;
@@ -165,6 +169,7 @@ void Solver::addJcc(ExprRef e, bool taken, ADDRINT pc) {
     return;
 
   // if e == Bool(true), then ignore
+  //如果这个jcc的跳转条件恒为真 就忽略
   if (e->kind() == Bool) {
     assert(!(castAs<BoolExpr>(e)->value()  ^ taken));
     return;
@@ -182,7 +187,9 @@ void Solver::addJcc(ExprRef e, bool taken, ADDRINT pc) {
   else
     is_interesting = isInterestingJcc(e, taken, pc);
 
+  //
   if (is_interesting)
+    //对其另一分支求解
     negatePath(e, taken);
   addConstraint(e, taken, is_interesting);
 }
@@ -193,9 +200,10 @@ void Solver::addAddr(ExprRef e, ADDRINT addr) {
 }
 
 void Solver::addAddr(ExprRef e, llvm::APInt addr) {
+  //如果这个表达式是具体化的话，不作处理
   if (e->isConcrete())
     return;
-
+  //判断是否是有趣测试用例  应该是对重复执行的修剪
   if (last_interested_) {
     reset();
     // TODO: add optimize in z3
@@ -205,12 +213,13 @@ void Solver::addAddr(ExprRef e, llvm::APInt addr) {
     z3::expr &z3_expr = e->toZ3Expr();
 
     // TODO: add unbound case
-    z3::expr min_expr = getMinValue(z3_expr);
-    z3::expr max_expr = getMaxValue(z3_expr);
-    solveOne(z3_expr == min_expr);
+    //获取边界值
+    z3::expr min_expr = getMinValue(z3_expr);//z3_expr的最小值(不包括等于)
+    z3::expr max_expr = getMaxValue(z3_expr);//z3_expr的最大值(不包括等于)
+    solveOne(z3_expr == min_expr);//对上面遗漏的边界值进行求解
     solveOne(z3_expr == max_expr);
   }
-
+  //将约束条件添加进节点
   addValue(e, addr);
 }
 
@@ -219,6 +228,7 @@ void Solver::addValue(ExprRef e, ADDRINT val) {
   addValue(e, v);
 }
 
+//添加一个值约束
 void Solver::addValue(ExprRef e, llvm::APInt val) {
   if (e->isConcrete())
     return;
@@ -228,37 +238,46 @@ void Solver::addValue(ExprRef e, llvm::APInt val) {
 #endif
 
   ExprRef expr_val = g_expr_builder->createConstant(val, e->bits());
-  ExprRef expr_concrete = g_expr_builder->createBinaryExpr(Equal, e, expr_val);
+  ExprRef expr_concrete = g_expr_builder->createBinaryExpr(Equal, e, expr_val);//构建Equal(e==val)的约束表达式
 
   addConstraint(expr_concrete, true, false);
 }
-
+//求解：先尝试结合前面的所有约束一起求解；失败的话就启动optimistic solving，只求解最后一次的约束；最后将此次的约束加入条件池方便syncConstraints(e)去同步
 void Solver::solveAll(ExprRef e, llvm::APInt val) {
-  if (last_interested_) {
+  //这里的last_interested_用来判定当前分支是否是interesting的
+  if (last_interested_) {//如果last_interested_被置为true 开始进行求解
     std::string postfix = "";
-    ExprRef expr_val = g_expr_builder->createConstant(val, e->bits());
-    ExprRef expr_concrete = g_expr_builder->createBinaryExpr(Equal, e, expr_val);
+    ExprRef expr_val = g_expr_builder->createConstant(val, e->bits());//val的表达式
+    ExprRef expr_concrete = g_expr_builder->createBinaryExpr(Equal, e, expr_val);//构建Equal(e==val)的约束表达式
 
-    reset();
+    reset();//重置solver
+    //author issue: 
+    //对于optimistic solving，只求解最后一次的约束；
+    //对于普通的求解  会通过syncConstraints(e)同步所有约束
     syncConstraints(e);
+    //将当前约束的相反约束加入求解器
     addToSolver(expr_concrete, false);
-
+    //检查无解  启用optimistic 求解，得到的case会添加后缀"optimistic" 
     if (check() != z3::sat) {
-      // Optimistic solving
+      // Optimistic solving ，只放入当前分支约束的相反条件
       reset();
       addToSolver(expr_concrete, false);
       postfix = "optimistic";
     }
-
+    //获得传入ExprRef的z3Expr
     z3::expr z3_expr = e->toZ3Expr();
     while(true) {
+      //循环尝试求解。如果求解失败则退出循环
       if (!checkAndSave(postfix))
         break;
+      //求解成功后
+      //获取模型中一个可能的z3_expr值
       z3::expr value = getPossibleValue(z3_expr);
+      //循环求解其他的可能值？
       add(value != z3_expr);
     }
   }
-  addValue(e, val);
+  addValue(e, val);//添加进约束，以便后续求解使用(也就是上面说的normal solving)
 }
 
 UINT8 Solver::getInput(ADDRINT index) {
@@ -300,17 +319,18 @@ std::vector<UINT8> Solver::getConcreteValues() {
   std::vector<UINT8> values = inputs_;
   for (unsigned i = 0; i < num_constants; i++) {
     z3::func_decl decl = m.get_const_decl(i);
-    z3::expr e = m.get_const_interp(decl);
-    z3::symbol name = decl.name();
+    z3::expr e = m.get_const_interp(decl);//
+    z3::symbol name = decl.name();//符号名称
 
     if (name.kind() == Z3_INT_SYMBOL) {
-      int value = e.get_numeral_int();
+      int value = e.get_numeral_int();//获取值 替换原始输入中的对应部分
       values[name.to_int()] = (UINT8)value;
     }
   }
   return values;
 }
 
+//输出结果   postfix为前后缀
 void Solver::saveValues(const std::string& postfix) {
   std::vector<UINT8> values = getConcreteValues();
 
@@ -319,7 +339,7 @@ void Solver::saveValues(const std::string& postfix) {
     printValues(values);
     return;
   }
-
+  //输出文件名
   std::string fname = out_dir_+ "/" + toString6digit(num_generated_);
   // Add postfix to record where it is genereated
   if (!postfix.empty())
@@ -347,18 +367,21 @@ void Solver::printValues(const std::vector<UINT8>& values) {
   fprintf(stderr, "\n");
 }
 
+//获取模型中z3_expr的一个值
 z3::expr Solver::getPossibleValue(z3::expr& z3_expr) {
   z3::model m = solver_.get_model();
   return m.eval(z3_expr);
 }
 
+//通过枚举一个可能值，并循环设置小于约束，不断缩小解的范围找到解的最小值(返回的是一个加入z3_expr<value条件会无解的value)
 z3::expr Solver::getMinValue(z3::expr& z3_expr) {
   push();
   z3::expr value(context_);
   while (true) {
-    if (checkAndSave()) {
+    if (checkAndSave()) {//为啥求最小的过程中还要保存求解结果
       value = getPossibleValue(z3_expr);
-      solver_.add(z3::ult(z3_expr, value));
+      //利用添加小于条件，不断缩小z3_expr至一个最小值
+      solver_.add(z3::ult(z3_expr, value));//位向量的无符号小于 z3::ult 
     }
     else
       break;
@@ -366,12 +389,12 @@ z3::expr Solver::getMinValue(z3::expr& z3_expr) {
   pop();
   return value;
 }
-
+//通过枚举一个可能值，并循环设置大于约束，不断缩小解的范围找到解的最大值(返回的是一个加入z3_expr>value条件会无解的value)
 z3::expr Solver::getMaxValue(z3::expr& z3_expr) {
   push();
   z3::expr value(context_);
   while (true) {
-    if (checkAndSave()) {
+    if (checkAndSave()) {//这也是，为啥求解这个过程的所有值全部输出
       value = getPossibleValue(z3_expr);
       solver_.add(z3::ugt(z3_expr, value));
     }
@@ -381,14 +404,14 @@ z3::expr Solver::getMaxValue(z3::expr& z3_expr) {
   pop();
   return value;
 }
-
+//将条件表达式添加进solver，taken表示是否取反
 void Solver::addToSolver(ExprRef e, bool taken) {
   e->simplify();
   if (!taken)
     e = g_expr_builder->createLNot(e);
   add(e->toZ3Expr());
 }
-
+//同步约束
 void Solver::syncConstraints(ExprRef e) {
   std::set<std::shared_ptr<DependencyTree<Expr>>> forest;
   DependencySet* deps = e->getDependencies();
@@ -433,12 +456,15 @@ void Solver::addConstraint(ExprRef e, bool taken, bool is_interesting) {
 
 void Solver::addConstraint(ExprRef e) {
   // If e is true, then just skip
+  //如果恒为true  跳过
   if (e->kind() == Bool) {
     QSYM_ASSERT(castAs<BoolExpr>(e)->value());
     return;
   }
+  //如果是具体值表达式 跳过
   if (e->isConcrete())
     return;
+  //添加约束
   dep_forest_.addNode(e);
 }
 
@@ -507,7 +533,7 @@ ExprRef Solver::getRangeConstraint(ExprRef e, bool is_unsigned) {
   return expr;
 }
 
-
+//called from addJcc
 bool Solver::isInterestingJcc(ExprRef rel_expr, bool taken, ADDRINT pc) {
   bool interesting = trace_.isInterestingBranch(pc, taken);
   // record for other decision
@@ -515,6 +541,7 @@ bool Solver::isInterestingJcc(ExprRef rel_expr, bool taken, ADDRINT pc) {
   return interesting;
 }
 
+//求解相反路径
 void Solver::negatePath(ExprRef e, bool taken) {
   reset();
   syncConstraints(e);
@@ -528,11 +555,12 @@ void Solver::negatePath(ExprRef e, bool taken) {
   }
 }
 
+//加入z3_expr 后尝试求解，之后去掉此z3_expr 
 void Solver::solveOne(z3::expr z3_expr) {
-  push();
-  add(z3_expr);
-  checkAndSave();
-  pop();
+  push();//类似栈操作  将当前solver环境保存
+  add(z3_expr);//添加一个z3_expr约束
+  checkAndSave();//尝试求解
+  pop();//之后恢复之前的环境
 }
 
 void Solver::checkFeasible() {

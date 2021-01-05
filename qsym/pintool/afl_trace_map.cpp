@@ -48,6 +48,7 @@ void AflTraceMap::setDefault() {
   memset(context_map_, 0, kMapSize);
 }
 
+//将提供的bitmap 读入trace_map_和context_map_
 void AflTraceMap::import(const std::string path) {
   ifstream ifs;
   ifs.open(path, ios::binary);
@@ -66,7 +67,7 @@ void AflTraceMap::import(const std::string path) {
 ADDRINT AflTraceMap::getIndex(ADDRINT h) {
   return ((prev_loc_ >> 1) ^ h) % kMapSize;
 }
-
+//是不是当前context的有趣用例
 bool AflTraceMap::isInterestingContext(ADDRINT h, ADDRINT bits) {
   if (!g_opt_context_sensitive.Value())
     return false;
@@ -104,6 +105,7 @@ bool AflTraceMap::isInterestingContext(ADDRINT h, ADDRINT bits) {
   return interesting;
 }
 
+//将trace_map 和context_map_ 都写入到 path_
 void AflTraceMap::commit() {
   if (!path_.empty()) {
     ofstream ofs;
@@ -116,6 +118,7 @@ void AflTraceMap::commit() {
   }
 }
 
+//构造  path为命令行传入的bitmap
 AflTraceMap::AflTraceMap(const std::string path)
   : path_(path),
     prev_loc_(0),
@@ -124,18 +127,21 @@ AflTraceMap::AflTraceMap(const std::string path)
   if (path.empty())
     setDefault();
   else
-    import(path);
+    import(path);//将给定的bitmap文件导入trace_map_和context_map_
 }
 
+//查看当前分支是不是interesting:virgin_map_是qsym保存的一个初始化全0的map,trace_map_被初始化为给定bitmap文件
 bool AflTraceMap::isInterestingBranch(ADDRINT pc, bool taken) {
   ADDRINT h = hashPc(pc, taken);
   ADDRINT idx = getIndex(h);
-  bool new_context = isInterestingContext(h, virgin_map_[idx]);
+  bool new_context = isInterestingContext(h, virgin_map_[idx]);//在virgin_map_中是否是有趣的
   bool ret = true;
 
   virgin_map_[idx]++;
 
+  //virgin_map_[idx] = 1 and  trace_map_[idx] = 0  也就是qsym第一次发现,给定的bitmap里面没有
   if ((virgin_map_[idx] | trace_map_[idx]) != trace_map_[idx]) {
+    //获取其反向分支hash
     ADDRINT inv_h = hashPc(pc, !taken);
     ADDRINT inv_idx = getIndex(inv_h);
 
